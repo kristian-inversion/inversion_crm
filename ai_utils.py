@@ -2,6 +2,9 @@ import json, re, logging
 from openai import OpenAI
 from schema import SCHEMA
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
@@ -23,8 +26,8 @@ def build_ai_prompt(text: str) -> str:
     Text: {text}
     """
 
-def parse_with_ai(text: str) -> dict:
-    prompt = build_ai_prompt(text)
+def parse_with_ai(text: str) -> dict | list[dict]:
+    prompt = build_ai_prompt(text) + "\nIf multiple people are mentioned, return a JSON array of objects."
     resp = openai_client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
@@ -40,9 +43,13 @@ def parse_with_ai(text: str) -> dict:
 
     try:
         data = json.loads(raw)
+        # ensure consistent output: always list of dicts
+        if isinstance(data, dict):
+            return [data]
+        elif isinstance(data, list):
+            return data
+        else:
+            raise ValueError("Unexpected JSON format")
     except Exception as e:
         logging.error(f"JSON parse error: {e}, raw response: {raw}")
-        data = {col: None for col in SCHEMA.keys()}
-        data["Notes"] = raw
-
-    return data
+        return [{col: None for col in SCHEMA.keys()} | {"Notes": raw}]

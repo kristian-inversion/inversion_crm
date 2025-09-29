@@ -4,6 +4,9 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from ai_utils import parse_with_ai
 from notion_utils import upsert_to_notion
 from openai import OpenAI
+from dotenv import load_dotenv
+
+load_dotenv()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 NOTION_DB_ID = os.getenv("NOTION_DB_ID")
@@ -18,9 +21,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    data = parse_with_ai(update.message.text)
-    msg = upsert_to_notion(NOTION_DB_ID, data)
-    await update.message.reply_text(f"{msg}")
+    records = parse_with_ai(update.message.text)
+    msgs = []
+    for data in records:
+        msg = upsert_to_notion(NOTION_DB_ID, data)
+        msgs.append(msg)
+    await update.message.reply_text("\n".join(msgs))
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = await update.message.voice.get_file()
@@ -30,9 +36,12 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             transcript = openai_client.audio.transcriptions.create(
                 model="gpt-4o-mini-transcribe", file=audio
             )
-    data = parse_with_ai(transcript.text)
-    msg = upsert_to_notion(NOTION_DB_ID, data)
-    await update.message.reply_text(f"{msg}")
+    records = parse_with_ai(transcript.text)
+    msgs = []
+    for data in records:
+        msg = upsert_to_notion(NOTION_DB_ID, data)
+        msgs.append(msg)
+    await update.message.reply_text("\n".join(msgs))
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -46,7 +55,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         messages = [{
             "role": "user",
             "content": [
-                {"type": "text", "text": "Extract CRM fields in JSON based on schema."},
+                {"type": "text", "text": "Extract CRM fields in JSON based on schema. If multiple people are mentioned, return a JSON array of objects."},
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
             ]
         }]
@@ -55,9 +64,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             model="gpt-4o-mini", messages=messages, temperature=0
         )
         raw = resp.choices[0].message.content.strip()
-        data = parse_with_ai(raw)
-        msg = upsert_to_notion(NOTION_DB_ID, data)
-        await update.message.reply_text(f"{msg}")
+        records = parse_with_ai(raw)
+        msgs = []
+        for data in records:
+            msg = upsert_to_notion(NOTION_DB_ID, data)
+            msgs.append(msg)
+        await update.message.reply_text("\n".join(msgs))
     except Exception as e:
         logging.error(f"Photo error: {e}")
         await update.message.reply_text("Couldn't process that image.")
