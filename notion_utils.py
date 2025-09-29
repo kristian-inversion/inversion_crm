@@ -1,6 +1,9 @@
 from notion_client import Client
 from schema import SCHEMA
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
 
