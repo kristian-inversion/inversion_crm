@@ -1,6 +1,7 @@
 from notion_client import Client
 from schema import SCHEMA
 import os
+import string
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -17,20 +18,26 @@ def build_notion_props(data: dict) -> dict:
             continue
 
         if spec["type"] == "title":
-            props[col] = {"title": [{"text": {"content": val}}]}
+            normalized = string.capwords(val)
+            props[col] = {"title": [{"text": {"content": normalized}}]}
         elif spec["type"] == "email":
             props[col] = {"email": val}
         elif spec["type"] == "phone_number":
             props[col] = {"phone_number": val}
         elif spec["type"] == "rich_text":
-            props[col] = {"rich_text": [{"text": {"content": val}}]}
+            if col == "Company/Org" or col == "Role/Title" or col == "Location" and isinstance(val, str):
+                normalized = string.capwords(val)
+            else:
+                normalized = val
+            props[col] = {"rich_text": [{"text": {"content": normalized}}]}
         elif spec["type"] == "select":
             if val in spec["options"]:
                 props[col] = {"select": {"name": val}}
         elif spec["type"] == "multi_select":
-            valid_tags = [t for t in (val if isinstance(val, list) else [val]) if t in spec["options"]]
-            if valid_tags:
-                props[col] = {"multi_select": [{"name": t} for t in valid_tags]}
+            raw_tags = val if isinstance(val, list) else [val]
+            cleaned_tags = [str(t).strip() for t in raw_tags if str(t).strip()]
+            if cleaned_tags:
+                props[col] = {"multi_select": [{"name": string.capwords(t)} for t in cleaned_tags]}
         elif spec["type"] == "date":
             props[col] = {"date": {"start": val}}
             continue
@@ -39,11 +46,8 @@ def build_notion_props(data: dict) -> dict:
 def upsert_to_notion(database_id: str, data: dict) -> str:
     filters = []
 
-    # Use Name + Company as "unique key"
     if data.get("Name"):
-        filters.append({"property": "Name", "title": {"equals": data["Name"]}})
-    if data.get("Company/Org"):
-        filters.append({"property": "Company/Org", "rich_text": {"equals": data["Company/Org"]}})
+        filters.append({"property": "Name", "title": {"equals": string.capwords(data["Name"])}})
 
     existing = {"results": []}
     if filters:
@@ -57,7 +61,7 @@ def upsert_to_notion(database_id: str, data: dict) -> str:
     if existing["results"]:
         page_id = existing["results"][0]["id"]
         notion.pages.update(page_id=page_id, properties=props)
-        return f"Updated {data.get('Name','(unknown)')} in Notion."
+        return f"Found existing entry for {data.get('Name','(unknown)')} in CRM. Updated their record with new information."
     else:
         notion.pages.create(parent={"database_id": database_id}, properties=props)
         return f"Created new entry for {data.get('Name','(unknown)')}."

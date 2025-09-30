@@ -20,6 +20,10 @@ def build_ai_prompt(text: str) -> str:
 
     Special rules:
     - If a field is not mentioned, return null.
+    - Tags are STRICTLY opt-in. Only populate "Tags" if the text explicitly requests a tag
+      (e.g., lines like "tag: X", "tags: X, Y", or "please add tag Foo"). Do not infer tags.
+    - When tags are requested, include them exactly as written, even if they are not in a predefined list.
+      Accept a single tag or multiple tags. Output Tags as an array of strings.
 
     Respond ONLY with valid JSON.
 
@@ -36,7 +40,6 @@ def parse_with_ai(text: str) -> dict | list[dict]:
 
     raw = resp.choices[0].message.content.strip()
 
-    # strip markdown fences
     if raw.startswith("```"):
         raw = re.sub(r"^```(?:json)?", "", raw, flags=re.MULTILINE).strip()
         raw = re.sub(r"```$", "", raw).strip()
@@ -50,6 +53,8 @@ def parse_with_ai(text: str) -> dict | list[dict]:
             return data
         else:
             raise ValueError("Unexpected JSON format")
+
     except Exception as e:
         logging.error(f"JSON parse error: {e}, raw response: {raw}")
         return [{col: None for col in SCHEMA.keys()} | {"Notes": raw}]
+
