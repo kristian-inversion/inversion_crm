@@ -3,6 +3,7 @@ from schema import SCHEMA
 import os
 import string
 from dotenv import load_dotenv
+from difflib import SequenceMatcher
 
 load_dotenv()
 
@@ -26,7 +27,22 @@ def build_notion_props(data: dict) -> dict:
             props[col] = {"phone_number": val}
         elif spec["type"] == "rich_text":
             if col == "Company/Org" or col == "Role/Title" or col == "Location" and isinstance(val, str):
-                normalized = string.capwords(val)
+                # Preserve acronyms and common lowercase words while title-casing the rest
+                words = val.split()
+                normalized_words = []
+                lowercase_words = {"of", "and", "the", "a", "an", "in", "on", "at", "to", "for", "with", "by"}
+                
+                for i, word in enumerate(words):
+                    if word.isupper() and len(word) > 1:
+                        # Keep acronyms as-is
+                        normalized_words.append(word)
+                    elif word.lower() in lowercase_words and i > 0:
+                        # Keep common words lowercase (except first word)
+                        normalized_words.append(word.lower())
+                    else:
+                        # Title case regular words
+                        normalized_words.append(string.capwords(word))
+                normalized = " ".join(normalized_words)
             else:
                 normalized = val
             props[col] = {"rich_text": [{"text": {"content": normalized}}]}
@@ -43,7 +59,88 @@ def build_notion_props(data: dict) -> dict:
             continue
     return props
 
-def upsert_to_notion(database_id: str, data: dict) -> str:
+def validate_customer_data(data: dict) -> tuple[bool, str]:
+    """
+    Validate customer data before sending to Notion.
+    Returns (is_valid, reason_if_invalid)
+    """
+    # Check for valid Name
+    name = data.get("Name")
+    if not name or not str(name).strip():
+        return False, "No valid name found"
+    
+    # Check if name has both first and last name
+    name_parts = str(name).strip().split()
+    if len(name_parts) < 2:
+        return False, "Please provide both first and last name"
+    
+    return True, ""
+
+def find_similar_names(database_id: str, name: str, threshold: float = 0.8) -> list[dict]:
+    """
+    Find existing records with similar names using fuzzy matching.
+    Returns list of similar records with similarity scores.
+    """
+    try:
+        # Get all existing records
+        all_records = notion.databases.query(database_id=database_id)
+        
+        similar_records = []
+        for record in all_records.get("results", []):
+            existing_name = ""
+            if "Name" in record.get("properties", {}):
+                name_prop = record["properties"]["Name"]
+                if name_prop.get("title") and len(name_prop["title"]) > 0:
+                    existing_name = name_prop["title"][0]["text"]["content"]
+            
+            if existing_name:
+                # Calculate similarity score
+                similarity = SequenceMatcher(None, name.lower(), existing_name.lower()).ratio()
+                if similarity >= threshold:
+                    similar_records.append({
+                        "record": record,
+                        "name": existing_name,
+                        "similarity": similarity
+                    })
+        
+        # Sort by similarity score (highest first)
+        similar_records.sort(key=lambda x: x["similarity"], reverse=True)
+        return similar_records
+        
+    except Exception as e:
+        logging.error(f"Error finding similar names: {e}")
+        return []
+
+def check_for_similar_names(database_id: str, data: dict) -> tuple[str, list[dict]]:
+    """
+    Check for similar names and return top-1 suggestion for yes/no confirmation.
+    Returns:
+      ("exact_match", results) OR ("suggest", [top_record]) OR ("no_match", [])
+    """
+    name = data.get("Name", "").strip()
+    if not name:
+        return "no_match", []
+
+    # First check exact match
+    filters = [{"property": "Name", "title": {"equals": string.capwords(name)}}]
+    exact_match = notion.databases.query(database_id=database_id, filter=filters[0])
+
+    if exact_match["results"]:
+        return "exact_match", exact_match["results"]
+
+    # Check for similar names and suggest only the top match
+    similar_records = find_similar_names(database_id, name, threshold=0.8)
+    if similar_records:
+        return "suggest", [similar_records[0]]
+
+    return "no_match", []
+
+def upsert_to_notion(database_id: str, data: dict, force_create: bool = False) -> str:
+    # Validate data first
+    is_valid, reason = validate_customer_data(data)
+    if not is_valid:
+        return f"Skipped {data.get('Name','(unknown)')}: {reason}"
+    
     filters = []
 
     if data.get("Name"):

@@ -20,10 +20,18 @@ def build_ai_prompt(text: str) -> str:
 
     Special rules:
     - If a field is not mentioned, return null.
+    - For "One-liner": Actively look for a brief description, summary, or key point about the person. 
+      This could be an event, why they're relevant, or a brief note about them.
+      Only include if there's meaningful content - don't make up generic descriptions.
+    - For emails (text or pictures): Only extract the SENDER as a customer, ignore recipients.
+      Focus on the person who sent the email, not who received it.
     - Tags are STRICTLY opt-in. Only populate "Tags" if the text explicitly requests a tag
-      (e.g., lines like "tag: X", "tags: X, Y", or "please add tag Foo"). Do not infer tags.
-    - When tags are requested, include them exactly as written, even if they are not in a predefined list.
-      Accept a single tag or multiple tags. Output Tags as an array of strings.
+      (e.g., lines like "Tag name as X", "tags: X, Y", or "please add tag Foo"). Do not infer tags.
+    - When tags are requested, first try to match them to these predefined options:
+      {", ".join(SCHEMA["Tags"]["options"])}
+    - If there's a good match (exact or very close), use the predefined option.
+    - If no good match exists, create a new tag with the exact text requested.
+    - Accept a single tag or multiple tags. Output Tags as an array of strings.
 
     Respond ONLY with valid JSON.
 
